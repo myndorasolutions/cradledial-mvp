@@ -1,3 +1,7 @@
+import { USSD_SERVICE_CODE } from './ussd'
+
+const USSD_TBA_DIAL = `${USSD_SERVICE_CODE.slice(0, -1)}*101#`
+
 export function dashboardPage(audioUrl: string): string {
   return `<!DOCTYPE html>
 <html lang="en">
@@ -31,7 +35,7 @@ export function dashboardPage(audioUrl: string): string {
     <div class="max-w-7xl mx-auto px-6 py-6 flex flex-wrap items-end justify-between gap-4">
       <div>
         <h1 class="font-display text-3xl md:text-4xl font-extrabold tracking-tight">CradleDial | Project 774 LGA Maternal Health Command Center</h1>
-        <p class="mt-2 text-emerald-100 text-lg">"Dialing Life into the Last Mile" — Zero-Internet USSD (*347*12#) &amp; Automated Dialect IVR</p>
+        <p class="mt-2 text-emerald-100 text-lg">"Dialing Life into the Last Mile" — Zero-Internet USSD (${USSD_SERVICE_CODE}) &amp; Automated Dialect IVR</p>
       </div>
       <div class="flex items-center gap-3 bg-white/10 rounded-full px-4 py-2">
         <span id="pulse" class="h-3 w-3 rounded-full bg-savannah animate-pulse"></span>
@@ -140,15 +144,26 @@ export function dashboardPage(audioUrl: string): string {
     </section>
   </main>
 
-  <aside id="nokia" class="fixed bottom-4 right-4 z-50 w-80 max-w-[calc(100vw-2rem)] rounded-[2.5rem] bg-slate-900 text-white shadow-2xl border-8 border-slate-700 p-4">
+  <aside id="nokia" class="fixed bottom-4 right-4 z-50 w-96 max-w-[calc(100vw-2rem)] max-h-[calc(100vh-2rem)] overflow-y-auto rounded-[2.5rem] bg-slate-900 text-white shadow-2xl border-8 border-slate-700 p-4">
     <p class="text-center text-[11px] tracking-[0.25em] text-slate-400 font-semibold">NOKIA TOUCHLIGHT</p>
     <div class="mt-3 rounded-2xl bg-emerald-950 text-emerald-100 p-4 min-h-44 font-display">
       <p id="nokia-title" class="text-lg font-extrabold leading-tight">CradleDial</p>
-      <p id="nokia-line" class="mt-2 text-sm">Waiting for a call from the LGA command center.</p>
+      <p id="nokia-line" class="mt-2 text-sm whitespace-pre-line">Waiting for a call from the LGA command center.</p>
       <p id="nokia-phone" class="mt-3 font-semibold"></p>
       <p id="nokia-dialect" class="text-sm"></p>
       <p id="nokia-timer" class="mt-3 text-3xl font-extrabold tracking-widest">00:00</p>
     </div>
+    <label class="mt-3 block text-[11px] font-semibold tracking-wide text-slate-400">USSD dial
+      <input id="ussd-dial" value="${USSD_SERVICE_CODE}" class="mt-1 w-full rounded-xl bg-slate-800 px-3 py-2 text-sm text-white">
+    </label>
+    <div class="mt-2 grid grid-cols-1 gap-2">
+      <button id="ussd-mother" type="button" class="rounded-xl bg-savannah px-2 py-2 text-xs font-extrabold text-white">Dial ${USSD_SERVICE_CODE} (Mother)</button>
+      <button id="ussd-tba" type="button" class="rounded-xl bg-trust px-2 py-2 text-xs font-extrabold text-white">Dial ${USSD_TBA_DIAL} (TBA 101)</button>
+    </div>
+    <form id="ussd-reply-form" class="mt-2 flex gap-2">
+      <input id="ussd-reply" class="min-w-0 flex-1 rounded-xl bg-slate-800 px-3 py-2 text-sm text-white" placeholder="Menu reply" autocomplete="off">
+      <button type="submit" class="rounded-xl bg-slate-600 px-3 text-xs font-bold text-white">Send</button>
+    </form>
     <div class="mt-4 grid grid-cols-2 gap-3">
       <button id="nokia-answer" class="rounded-2xl bg-savannah text-white font-extrabold py-3" disabled>Answer Call</button>
       <button id="nokia-end" class="rounded-2xl bg-terracotta text-white font-extrabold py-3" disabled>End Call</button>
@@ -158,6 +173,8 @@ export function dashboardPage(audioUrl: string): string {
 
   <script>
     const ADMIN_KEY = 'cradledial2026';
+    const USSD_CODE = ${JSON.stringify(USSD_SERVICE_CODE)};
+    const USSD_TBA_DIAL = ${JSON.stringify(USSD_TBA_DIAL)};
     let selectedPhone = '';
     let latestPayouts = [];
 
@@ -422,6 +439,76 @@ export function dashboardPage(audioUrl: string): string {
 
     document.getElementById('nokia-end').addEventListener('click', function () {
       finishPhoneCall();
+    });
+
+    let ussdSessionId = '';
+    let ussdText = '';
+
+    function ussdInputFromDial(dialString) {
+      const trimmed = String(dialString || '').trim();
+      const prefix = USSD_CODE.slice(0, -1);
+      if (trimmed === USSD_CODE || trimmed === prefix) return '';
+      if (trimmed.indexOf(prefix + '*') === 0) return trimmed.slice(prefix.length + 1).replace(/#$/, '');
+      return '';
+    }
+
+    async function postUssd() {
+      const stage = document.getElementById('stage-phone').value.trim();
+      const body = new URLSearchParams({
+        sessionId: ussdSessionId,
+        phoneNumber: stage || '+2348030000101',
+        serviceCode: USSD_CODE,
+        text: ussdText
+      });
+      try {
+        const response = await fetch('/webhooks/ussd', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+          body: body
+        });
+        const message = (await response.text()).replace(/\\r\\n/g, '\\n');
+        const ended = message.indexOf('END ') === 0;
+        const continued = message.indexOf('CON ') === 0;
+        const display = ended || continued ? message.slice(4) : message;
+        setPhone(ended ? 'USSD ended' : 'USSD', display, USSD_CODE, ussdText, ended ? 'END' : 'CON');
+        if (ended) {
+          phoneState = 'idle';
+          ussdSessionId = '';
+          ussdText = '';
+        }
+      } catch (error) {
+        phoneState = 'idle';
+        document.getElementById('action-status').textContent = error.message;
+      }
+    }
+
+    async function startUssd(dialString) {
+      if (phoneState === 'incoming' || phoneState === 'connected' || phoneState === 'ending') return;
+      const dial = String(dialString || '').trim() || USSD_CODE;
+      document.getElementById('ussd-dial').value = dial;
+      ussdSessionId = 'ussd-' + crypto.randomUUID();
+      ussdText = ussdInputFromDial(dial);
+      phoneState = 'ussd';
+      await postUssd();
+    }
+
+    document.getElementById('ussd-mother').addEventListener('click', function () {
+      startUssd(USSD_CODE);
+    });
+    document.getElementById('ussd-tba').addEventListener('click', function () {
+      startUssd(USSD_TBA_DIAL);
+    });
+    document.getElementById('ussd-dial').addEventListener('keydown', function (event) {
+      if (event.key === 'Enter') startUssd(event.target.value);
+    });
+    document.getElementById('ussd-reply-form').addEventListener('submit', function (event) {
+      event.preventDefault();
+      if (phoneState !== 'ussd' || !ussdSessionId) return;
+      const reply = document.getElementById('ussd-reply').value.trim();
+      if (!reply) return;
+      ussdText = ussdText ? ussdText + '*' + reply : reply;
+      document.getElementById('ussd-reply').value = '';
+      postUssd();
     });
 
     const originalRender = render;

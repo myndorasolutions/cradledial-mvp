@@ -3,6 +3,8 @@ import type { Bindings, Json, Tba } from '../types/env'
 import { createSupabaseClient } from '../lib/supabase'
 import { normalizeNigerianPhone } from '../lib/phone'
 
+export const USSD_SERVICE_CODE = '*384*41445#'
+
 const TEXT_PLAIN = 'text/plain; charset=utf-8'
 const SAVE_FAILED = 'END CradleDial could not save your details. Please dial again.'
 const INVALID_PHONE =
@@ -41,6 +43,13 @@ type Supabase = ReturnType<typeof createSupabaseClient>
 
 export const ussdRoutes = new Hono<{ Bindings: Bindings }>()
 
+ussdRoutes.get('/', (c) => {
+  return c.json({
+    service: `CradleDial USSD Webhook (${USSD_SERVICE_CODE})`,
+    status: 'ok',
+  })
+})
+
 ussdRoutes.post('/', async (c) => {
   try {
     return await handleUssd(c)
@@ -53,7 +62,7 @@ ussdRoutes.post('/', async (c) => {
 async function handleUssd(c: AppContext): Promise<Response> {
   const payload = await readPayload(c)
   const sessionId = payload.sessionId?.trim() ?? ''
-  const serviceCode = payload.serviceCode?.trim() || '*347*12#'
+  const serviceCode = payload.serviceCode?.trim() || USSD_SERVICE_CODE
   const rawPhone = payload.phoneNumber?.trim() ?? ''
   const text = (payload.text ?? '').trim()
 
@@ -221,7 +230,7 @@ async function registerNewTba(session: SessionContext): Promise<Response> {
       session,
       'tba_registered',
       { text: session.text, parts: session.parts, agent_code: agentCode, full_name: fullName },
-      `END Welcome ${fullName}! Your CradleDial TBA Agent Code is ${agentCode}. Dial *347*12*${agentCode}# to onboard mothers and earn N50 per mother.`,
+      `END Welcome ${fullName}! Your CradleDial TBA Agent Code is ${agentCode}. Dial ${USSD_SERVICE_CODE.slice(0, -1)}*${agentCode}# (or ${USSD_SERVICE_CODE} -> Option 6) to onboard mothers and earn N50 per mother.`,
     )
   } catch (error) {
     console.error('TBA registration failed', error)
@@ -467,10 +476,11 @@ function parseMonth(value: string): number | null {
 }
 
 function agentCodeFromServiceCode(serviceCode: string): string | null {
-  const segments = serviceCode.trim().replace(/#$/, '').split('*').filter(Boolean)
-  if (segments.length < 3) return null
-  const code = segments[segments.length - 1] ?? ''
-  return /^\d{3,}$/.test(code) ? code : null
+  const prefix = USSD_SERVICE_CODE.slice(0, -1)
+  const rest = serviceCode.trim().slice(prefix.length).replace(/#$/, '')
+  if (!serviceCode.trim().startsWith(prefix)) return null
+  const match = /^\*(\d{3,})$/.exec(rest)
+  return match?.[1] ?? null
 }
 
 async function readPayload(c: AppContext): Promise<Record<string, string>> {

@@ -5,6 +5,7 @@
 - Database: Supabase PostgreSQL (`@supabase/supabase-js` initialized per-request with `SUPABASE_URL` and `SUPABASE_SERVICE_ROLE_KEY` from Worker `c.env`)
 - Storage: Cloudflare R2 (`AUDIO_BUCKET` binding + `R2_PUBLIC_URL` env var)
 - Telephony: Africa's Talking REST APIs (USSD, Voice, Airtime) using native Web-Standard `fetch` (DO NOT install the Node.js `africastalking` npm SDK; use clean typed `fetch` requests with `apiKey` and `Accept: application/json` headers).
+- Official Africa's Talking USSD Service Code: `*384*41445#`. TBA direct dial is `*384*41445*AgentCode#` (for example `*384*41445*101#`). Do not use any other service code.
 - Frontend (LGA Pitch Dashboard): Single-page HTML/TailwindCSS/Vanilla JS UI served via Hono route `GET /dashboard` using official brand colors: Savannah Green (`#2E8B57`), Maternal Terracotta (`#CD5C5C`), Trust Blue (`#1E3A8A`), and Google Fonts `Nunito` and `Inter`.
 - USSD Timeout Safety: All `/webhooks/ussd` responses MUST return plain text (`Content-Type: text/plain`) starting with exact `CON ` or `END ` in under 1500ms.
 - Voice XML Compliance: All `/webhooks/voice/*` responses MUST return valid `application/xml`. A `<Response>` may be empty, or contain `<Play url="..."/>`, `<Say>...</Say>`, or both.
