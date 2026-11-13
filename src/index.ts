@@ -6,6 +6,7 @@ import { audioRoutes } from './routes/audio'
 import { cronRoutes } from './routes/cron'
 import { dashboardRoutes } from './routes/dashboard'
 import { dashboardPage } from './routes/dashboard-page'
+import { phonePage, phoneRoutes } from './routes/phone'
 import { ussdRoutes } from './routes/ussd'
 import { callRoutes, voiceRoutes } from './routes/voice'
 
@@ -28,6 +29,7 @@ app.route('/api/audio', audioRoutes)
 app.route('/api/calls', callRoutes)
 app.route('/api/cron', cronRoutes)
 app.route('/api/dashboard', dashboardRoutes)
+app.route('/api/phone', phoneRoutes)
 
 app.get('/audio/*', async (c) => {
   const key = decodeURIComponent(c.req.path.replace(/^\/audio\//, ''))
@@ -45,6 +47,10 @@ app.get('/audio/*', async (c) => {
 
 app.get('/dashboard', (c) => {
   return c.html(dashboardPage('/audio/emergency/ward4_cholera.wav'))
+})
+
+app.get('/phone', (c) => {
+  return c.html(phonePage())
 })
 
 const handler: ExportedHandler<Bindings> = {

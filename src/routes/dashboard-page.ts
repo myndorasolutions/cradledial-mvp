@@ -86,6 +86,17 @@ export function dashboardPage(audioUrl: string): string {
       <p id="stage-register-status" class="mt-3 text-sm text-slate-600"></p>
     </section>
 
+    <section class="bg-white rounded-3xl shadow-sm border-4 border-trust p-6 flex flex-wrap items-center gap-6">
+      <img id="phone-qr" alt="QR code for the live handset" width="180" height="180" class="rounded-2xl border border-slate-200 bg-white">
+      <div class="min-w-0 flex-1">
+        <h2 class="font-display text-2xl text-trust">Scan QR to Test on Your Phone (/phone)</h2>
+        <p class="text-slate-600 mt-1">Judges scan this code, dial ${USSD_SERVICE_CODE} on their own screen, and hear the lesson from the phone speaker.</p>
+        <a id="phone-link" href="/phone" class="mt-3 inline-block break-all font-semibold text-savannah underline">Open /phone</a>
+        <button id="phone-copy" type="button" class="mt-3 ml-0 sm:ml-3 rounded-xl bg-trust px-4 py-2 font-semibold text-white">Copy /phone Link</button>
+        <p id="phone-copy-status" class="mt-2 text-sm text-slate-600"></p>
+      </div>
+    </section>
+
     <section class="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-5 gap-4">
       <article class="bg-white rounded-2xl shadow-sm p-5 border-t-4 border-savannah">
         <p class="text-sm text-slate-500">Expectant Mothers Enrolled</p>
@@ -211,6 +222,20 @@ export function dashboardPage(audioUrl: string): string {
 
   <script>
     const ADMIN_KEY = 'cradledial2026';
+    const phoneUrl = location.origin + '/phone';
+    const phoneLink = document.getElementById('phone-link');
+    phoneLink.href = phoneUrl;
+    phoneLink.textContent = phoneUrl;
+    document.getElementById('phone-qr').src = 'https://api.qrserver.com/v1/create-qr-code/?size=180x180&data=' + encodeURIComponent(phoneUrl);
+    document.getElementById('phone-copy').addEventListener('click', async function () {
+      const status = document.getElementById('phone-copy-status');
+      try {
+        await navigator.clipboard.writeText(phoneUrl);
+        status.textContent = 'Copied.';
+      } catch (error) {
+        status.textContent = phoneUrl;
+      }
+    });
     const USSD_CODE = ${JSON.stringify(USSD_SERVICE_CODE)};
     const USSD_TBA_DIAL = ${JSON.stringify(USSD_TBA_DIAL)};
     let selectedPhone = '';
