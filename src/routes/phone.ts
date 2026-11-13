@@ -66,6 +66,7 @@ export function phonePage(): string {
 
     <p id="dial" class="mt-5 min-h-14 rounded-2xl bg-slate-900 px-4 py-3 text-center font-display text-2xl tracking-wide"> </p>
     <p id="dial-status" class="mt-2 min-h-5 text-center text-sm text-emerald-200"></p>
+    <button id="receive-ivr" type="button" class="mt-3 w-full rounded-2xl bg-trust py-3 text-sm font-extrabold">Receive My Weekly IVR Call Now</button>
 
     <div id="keys" class="mt-4 grid grid-cols-3 gap-3">
       <button type="button" data-key="1" class="h-16 rounded-full bg-slate-800 text-2xl font-bold">1</button>
@@ -83,7 +84,7 @@ export function phonePage(): string {
     </div>
     <div class="mt-3 grid grid-cols-4 gap-3">
       <button id="back" type="button" class="col-span-1 h-14 rounded-full bg-slate-800 text-lg font-bold">⌫</button>
-      <button id="call" type="button" class="col-span-3 h-14 rounded-full bg-savannah text-lg font-extrabold">CALL / DIAL</button>
+      <button id="dial-btn" type="button" class="col-span-3 h-14 rounded-full bg-savannah text-lg font-extrabold">CALL / DIAL</button>
     </div>
   </div>
 
@@ -107,21 +108,33 @@ export function phonePage(): string {
       <p id="call-title" class="font-display text-2xl font-extrabold leading-tight">Incoming Call: CradleDial Maternal Health (${USSD_SERVICE_CODE})</p>
       <p id="call-kind" class="mt-4 text-lg text-emerald-200">Weekly Stage Lesson</p>
       <p id="call-phone" class="mt-3 text-xl font-semibold"></p>
-      <p id="call-timer" class="mt-8 font-display text-6xl font-extrabold tracking-widest">00:00</p>
+      <p id="call-script" class="mt-3 text-sm text-emerald-100"></p>
+      <div id="call-meter" class="mx-auto mt-4 hidden h-8 items-end justify-center gap-1">
+        <span class="meter-bar"></span><span class="meter-bar"></span><span class="meter-bar"></span><span class="meter-bar"></span><span class="meter-bar"></span>
+      </div>
+      <p id="call-timer" class="mt-6 font-display text-6xl font-extrabold tracking-widest">00:00</p>
+      <button id="call-replay" type="button" class="mt-4 rounded-full bg-white/10 px-4 py-3 text-sm font-bold">Tap to Unmute / Replay Audio</button>
     </div>
     <div class="grid w-full max-w-sm grid-cols-2 gap-4">
       <button id="call-decline" type="button" class="rounded-full bg-terracotta py-5 text-lg font-extrabold">Decline</button>
       <button id="call-answer" type="button" class="rounded-full bg-savannah py-5 text-lg font-extrabold">Answer</button>
-      <button id="call-hangup" type="button" class="col-span-2 hidden rounded-full bg-terracotta py-5 text-lg font-extrabold" disabled>Hang up</button>
+      <button id="call-hangup" type="button" class="col-span-2 hidden rounded-full bg-terracotta py-5 text-lg font-extrabold">End Call</button>
     </div>
-    <audio id="call-player" class="hidden"></audio>
+    <audio id="ivr-audio-player" preload="auto" class="hidden"></audio>
+    <style>
+      .meter-bar { display: inline-block; width: 6px; height: 10px; border-radius: 999px; background: #6ee7b7; animation: level 0.8s ease-in-out infinite; }
+      .meter-bar:nth-child(2) { animation-delay: 0.1s; }
+      .meter-bar:nth-child(3) { animation-delay: 0.2s; }
+      .meter-bar:nth-child(4) { animation-delay: 0.3s; }
+      .meter-bar:nth-child(5) { animation-delay: 0.4s; }
+      @keyframes level { 50% { height: 28px; } }
+    </style>
   </div>
 
   <script>
     const USSD_CODE = ${JSON.stringify(USSD_SERVICE_CODE)};
     const USSD_TBA = ${JSON.stringify(USSD_TBA_DIAL)};
     const SIM_KEY = 'cradledial-sim-phone';
-    const pageOpenedAt = Date.now();
     const seenCallIds = new Set();
     const finishedCallIds = new Set();
     let phoneState = 'idle';
@@ -148,10 +161,40 @@ export function phonePage(): string {
       localStorage.setItem(SIM_KEY, simInput.value.trim());
     });
 
+    function normalizeSim(input) {
+      const compact = String(input || '').trim().replace(/[\\s\\-()]/g, '');
+      const digits = compact.charAt(0) === '+' ? compact.slice(1) : compact;
+      let national = '';
+      if (digits.indexOf('234') === 0 && digits.length === 13) national = digits.slice(3);
+      else if (digits.charAt(0) === '0' && digits.length === 11) national = digits.slice(1);
+      else if (digits.length === 10) national = digits;
+      if (!/^[1-9]\\d{9}$/.test(national)) return '';
+      return '+234' + national;
+    }
+
     function simPhone() {
       const value = simInput.value.trim();
       if (value) localStorage.setItem(SIM_KEY, value);
-      return value;
+      return normalizeSim(value);
+    }
+
+    function lessonPath(call) {
+      const audioUrl = call && (call.audio_url || call.audioUrl);
+      if (audioUrl) {
+        try {
+          const url = new URL(audioUrl, location.origin);
+          if (url.origin === location.origin && url.pathname.indexOf('/audio/') === 0) return url.pathname;
+        } catch (error) {}
+      }
+      const language = (call && call.language) || 'english';
+      const week = (call && call.gestation_week) || 16;
+      return '/audio/' + language + '/week_' + week + '.wav';
+    }
+
+    function lessonLabel(call) {
+      const language = call && call.language ? call.language.charAt(0).toUpperCase() + call.language.slice(1) : 'Lesson';
+      const week = call && call.gestation_week ? ' · Week ' + call.gestation_week : '';
+      return language + week;
     }
 
     function ussdInputFromDial(dialString) {
@@ -249,7 +292,7 @@ export function phonePage(): string {
       const current = dial.textContent.trim();
       dial.textContent = current.slice(0, -1);
     });
-    document.getElementById('call').addEventListener('click', function () {
+    document.getElementById('dial-btn').addEventListener('click', function () {
       startUssd(dial.textContent.trim());
     });
     document.getElementById('pill-mother').addEventListener('click', function () {
@@ -276,10 +319,17 @@ export function phonePage(): string {
     document.getElementById('ussd-cancel').addEventListener('click', hideUssd);
     document.getElementById('ussd-ok').addEventListener('click', hideUssd);
     document.getElementById('ussd-test').addEventListener('click', testWeeklyCall);
+    document.getElementById('receive-ivr').addEventListener('click', testWeeklyCall);
 
     async function testWeeklyCall() {
       const phone = simPhone();
-      const note = document.getElementById('ussd-note');
+      const onUssd = document.getElementById('ussd').style.display === 'flex';
+      const note = onUssd ? document.getElementById('ussd-note') : document.getElementById('dial-status');
+      if (!phone) {
+        note.textContent = 'Enter a valid SIM number like 0803...';
+        simInput.focus();
+        return;
+      }
       note.textContent = 'Queuing your lesson...';
       try {
         const response = await fetch('/api/calls/trigger-weekly', {
@@ -292,11 +342,14 @@ export function phonePage(): string {
           note.textContent = data.error || 'Could not queue the lesson.';
           return;
         }
-        const call = data.calls && data.calls[0] && data.calls[0].callLog;
+        const item = data.calls && data.calls[0];
+        const call = item && item.callLog;
         if (!call) {
           note.textContent = 'No enrolled mother for this SIM yet.';
           return;
         }
+        if (item.callLogId) call.id = item.callLogId;
+        if (item.audioUrl) call.audio_url = item.audioUrl;
         hideUssd();
         beginRing(call);
       } catch (error) {
@@ -361,7 +414,10 @@ export function phonePage(): string {
       callSessionId = '';
       document.getElementById('call-title').textContent = 'Incoming Call: CradleDial Maternal Health (' + USSD_CODE + ')';
       document.getElementById('call-kind').textContent = call.call_type === 'emergency_broadcast' ? 'Ward 4 Emergency Broadcast' : 'Weekly Stage Lesson';
+      document.getElementById('call-script').textContent = lessonLabel(call);
       document.getElementById('call-phone').textContent = call.phone_number || simPhone();
+      document.getElementById('call-meter').style.display = 'none';
+      document.getElementById('call-replay').classList.add('hidden');
       document.getElementById('call-timer').textContent = '00:00';
       document.getElementById('call-answer').disabled = false;
       document.getElementById('call-answer').classList.remove('hidden');
@@ -386,54 +442,72 @@ export function phonePage(): string {
       return response.text();
     }
 
-    document.getElementById('call-answer').addEventListener('click', async function () {
+    function playLesson(src) {
+      const player = document.getElementById('ivr-audio-player');
+      player.src = src;
+      const played = player.play();
+      if (played && played.catch) {
+        played.catch(function () {
+          document.getElementById('call-replay').classList.remove('hidden');
+        });
+      }
+      return player;
+    }
+
+    document.getElementById('call-answer').addEventListener('click', function () {
       if (phoneState !== 'incoming' || !activeCall) return;
       stopRing();
+      const player = playLesson(lessonPath(activeCall));
+      player.onerror = function () {
+        if (player.getAttribute('data-fallback') === '1') return;
+        player.setAttribute('data-fallback', '1');
+        playLesson('/audio/english/week_16.wav');
+      };
+      player.onended = function () {
+        finishCall();
+      };
       phoneState = 'connected';
-      document.getElementById('call-answer').disabled = true;
       document.getElementById('call-answer').classList.add('hidden');
       document.getElementById('call-decline').classList.add('hidden');
       document.getElementById('call-hangup').classList.remove('hidden');
+      document.getElementById('call-replay').classList.remove('hidden');
+      document.getElementById('call-meter').style.display = 'flex';
       document.getElementById('call-title').textContent = 'Connected';
+      document.getElementById('call-script').textContent = lessonLabel(activeCall);
       callSessionId = 'phone-' + crypto.randomUUID();
       callStartedAt = Date.now();
-      clipFinished = false;
+      document.getElementById('call-timer').textContent = '00:01';
       timerHandle = window.setInterval(function () {
-        const elapsed = Math.floor((Date.now() - callStartedAt) / 1000);
+        const elapsed = Math.max(1, Math.floor((Date.now() - callStartedAt) / 1000));
         document.getElementById('call-timer').textContent = clock(elapsed);
-        if (elapsed >= 15) document.getElementById('call-hangup').disabled = false;
       }, 250);
-      try {
-        const xml = await postVoice({
-          isActive: '1',
-          sessionId: callSessionId,
-          destinationNumber: simPhone(),
-          callerNumber: simPhone(),
-          direction: 'Outbound'
-        });
-        const match = xml.match(/<Play url="([^"]+)"/);
-        const playUrl = match ? match[1].replace(/&amp;/g, '&') : (activeCall.audio_url || '');
-        const player = document.getElementById('call-player');
-        player.onended = function () {
-          clipFinished = true;
-          finishCall();
-        };
-        player.src = playUrl;
-        await player.play();
-      } catch (error) {
+      const phone = simPhone();
+      postVoice({
+        isActive: '1',
+        sessionId: callSessionId,
+        destinationNumber: phone,
+        callerNumber: phone,
+        direction: 'Outbound'
+      }).catch(function (error) {
         document.getElementById('call-kind').textContent = error.message;
-      }
+      });
+    });
+
+    document.getElementById('call-replay').addEventListener('click', function () {
+      const player = document.getElementById('ivr-audio-player');
+      if (!player.src) playLesson(activeCall ? lessonPath(activeCall) : '/audio/english/week_16.wav');
+      else player.play();
     });
 
     async function finishCall() {
       if (phoneState !== 'connected' || !activeCall) return;
       phoneState = 'ending';
       window.clearInterval(timerHandle);
-      const player = document.getElementById('call-player');
+      const player = document.getElementById('ivr-audio-player');
       player.onended = null;
       player.pause();
       const elapsed = Math.max(1, Math.round((Date.now() - callStartedAt) / 1000));
-      const duration = clipFinished ? Math.max(20, elapsed) : elapsed;
+      const duration = Math.max(20, elapsed);
       const finishedId = activeCall.id;
       try {
         await postVoice({
@@ -490,10 +564,6 @@ export function phonePage(): string {
         const data = await response.json();
         const call = data.call;
         if (!call || !call.id || seenCallIds.has(call.id) || finishedCallIds.has(call.id)) return;
-        if (new Date(call.created_at).getTime() < pageOpenedAt - 15000) {
-          seenCallIds.add(call.id);
-          return;
-        }
         beginRing(call);
       } catch (error) {
         return;

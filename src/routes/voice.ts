@@ -237,8 +237,14 @@ export async function simulateCompletedWeeklyCall(env: Bindings, phoneNumber: st
 
 async function triggerWeekly(c: AppContext): Promise<Response> {
   const body = (await c.req.json<Record<string, unknown>>().catch(() => ({}))) as Record<string, unknown>
-  const requested = typeof body.phoneNumber === 'string' ? body.phoneNumber : ''
-  const phone = requested ? normalizeNigerianPhone(requested) : null
+  const requested = typeof body.phoneNumber === 'string' ? body.phoneNumber.trim() : ''
+  if (!requested) return c.json({ error: 'phoneNumber is required' }, 400)
+  let phone: string
+  try {
+    phone = normalizeNigerianPhone(requested)
+  } catch {
+    return c.json({ error: 'Invalid phone number' }, 400)
+  }
   const supabase = createSupabaseClient(c.env)
 
   let query = supabase.from('mothers').select('*').eq('is_active', true)
@@ -286,7 +292,13 @@ async function triggerWeekly(c: AppContext): Promise<Response> {
       callError = error instanceof Error ? error.message : 'Africa\'s Talking call failed'
       console.error('Outbound call failed', callError)
     }
-    calls.push({ callLog: savedLog, africastalking, error: callError })
+    calls.push({
+      callLog: savedLog,
+      callLogId: savedLog?.id ?? null,
+      audioUrl,
+      africastalking,
+      error: callError,
+    })
   }
 
   return c.json({ calls })

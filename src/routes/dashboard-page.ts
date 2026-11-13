@@ -369,10 +369,8 @@ export function dashboardPage(audioUrl: string): string {
       }
     });
 
-    const pageOpenedAt = Date.now();
     const seenCallIds = new Set();
     const finishedCallIds = new Set();
-    let callsPrimed = false;
     let ringingCall = null;
     let phoneState = 'idle';
     let callStartedAt = 0;
@@ -395,27 +393,7 @@ export function dashboardPage(audioUrl: string): string {
       document.getElementById('nokia-timer').textContent = timer;
     }
 
-    function watchCalls(logs) {
-      const open = (logs || []).filter(function (log) {
-        return (log.status === 'queued' || log.status === 'ringing') && !finishedCallIds.has(log.id);
-      });
-      if (!callsPrimed) {
-        open.forEach(function (log) {
-          if (new Date(log.created_at).getTime() < pageOpenedAt - 2000) seenCallIds.add(log.id);
-        });
-        callsPrimed = true;
-      }
-      if (phoneState !== 'idle') return;
-      const fresh = open.filter(function (log) { return !seenCallIds.has(log.id); });
-      fresh.sort(function (a, b) { return String(a.created_at).localeCompare(String(b.created_at)); });
-      if (!fresh.length) return;
-      ringingCall = fresh[0];
-      seenCallIds.add(ringingCall.id);
-      phoneState = 'incoming';
-      const dialect = ringingCall.language ? ringingCall.language.charAt(0).toUpperCase() + ringingCall.language.slice(1) : '';
-      setPhone('Incoming Call', 'CradleDial Maternal Health', ringingCall.phone_number, dialect, '00:00');
-      document.getElementById('nokia-answer').disabled = false;
-      document.getElementById('nokia-end').disabled = true;
+    function watchCalls() {
     }
 
     function showIncomingCall(log) {
