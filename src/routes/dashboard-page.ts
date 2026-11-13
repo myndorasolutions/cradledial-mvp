@@ -3,6 +3,12 @@ import { USSD_SERVICE_CODE } from './ussd'
 const USSD_TBA_DIAL = `${USSD_SERVICE_CODE.slice(0, -1)}*101#`
 
 export function dashboardPage(audioUrl: string): string {
+  const monthOptions = [1, 2, 3, 4, 5, 6, 7, 8, 9]
+    .map((month) => {
+      const selected = month === 4 ? ' selected' : ''
+      return `<option value="${month}"${selected}>Month ${month} / Week ${month * 4}</option>`
+    })
+    .join('')
   return `<!DOCTYPE html>
 <html lang="en">
 <head>
@@ -48,6 +54,38 @@ export function dashboardPage(audioUrl: string): string {
   </header>
 
   <main class="max-w-7xl mx-auto px-6 py-8 space-y-8">
+    <section class="bg-white rounded-3xl shadow-sm border-4 border-savannah p-6">
+      <h2 class="font-display text-2xl text-trust">Register Judge / Physical Phone Number (Live Stage Test)</h2>
+      <p class="text-slate-600 mt-1">Enroll any Nigerian handset, then ring the Nokia simulator with that dialect lesson.</p>
+      <div class="grid md:grid-cols-2 xl:grid-cols-4 gap-4 mt-5">
+        <label class="block text-sm font-semibold">Phone Number
+          <input id="stage-judge-phone" class="mt-1 w-full rounded-xl border border-slate-300 px-3 py-3" placeholder="08031234567" autocomplete="off">
+        </label>
+        <label class="block text-sm font-semibold">Language
+          <select id="stage-language" class="mt-1 w-full rounded-xl border border-slate-300 px-3 py-3">
+            <option value="hausa">Hausa</option>
+            <option value="yoruba">Yoruba</option>
+            <option value="pidgin">Pidgin</option>
+            <option value="igbo">Igbo</option>
+            <option value="english">English</option>
+          </select>
+        </label>
+        <label class="block text-sm font-semibold">Month of Pregnancy
+          <select id="stage-month" class="mt-1 w-full rounded-xl border border-slate-300 px-3 py-3">
+            ${monthOptions}
+          </select>
+        </label>
+        <label class="block text-sm font-semibold">Onboarding Channel
+          <select id="stage-channel" class="mt-1 w-full rounded-xl border border-slate-300 px-3 py-3">
+            <option value="">Direct Mother (${USSD_SERVICE_CODE})</option>
+            <option value="101">Via TBA Mama Chinyere - Code 101</option>
+          </select>
+        </label>
+      </div>
+      <button id="stage-register-btn" class="mt-5 w-full md:w-auto bg-savannah hover:bg-emerald-700 text-white font-display text-xl font-extrabold rounded-2xl px-8 py-4">Register &amp; Call Phone Now</button>
+      <p id="stage-register-status" class="mt-3 text-sm text-slate-600"></p>
+    </section>
+
     <section class="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-5 gap-4">
       <article class="bg-white rounded-2xl shadow-sm p-5 border-t-4 border-savannah">
         <p class="text-sm text-slate-500">Expectant Mothers Enrolled</p>
@@ -354,6 +392,50 @@ export function dashboardPage(audioUrl: string): string {
       document.getElementById('nokia-answer').disabled = false;
       document.getElementById('nokia-end').disabled = true;
     }
+
+    function showIncomingCall(log) {
+      if (!log) return;
+      if (phoneState === 'connected' || phoneState === 'ending') {
+        document.getElementById('stage-register-status').textContent = 'Registered ' + (log.phone_number || '') + '. The Nokia is already on a call.';
+        return;
+      }
+      if (log.id) seenCallIds.add(log.id);
+      ringingCall = log;
+      phoneState = 'incoming';
+      const dialect = log.language ? log.language.charAt(0).toUpperCase() + log.language.slice(1) : '';
+      setPhone('Incoming Call', 'CradleDial Maternal Health', log.phone_number, dialect, '00:00');
+      document.getElementById('nokia-answer').disabled = false;
+      document.getElementById('nokia-end').disabled = true;
+    }
+
+    document.getElementById('stage-register-btn').addEventListener('click', async function () {
+      const phoneNumber = document.getElementById('stage-judge-phone').value.trim();
+      const status = document.getElementById('stage-register-status');
+      if (!phoneNumber) {
+        status.textContent = 'Enter a phone number.';
+        return;
+      }
+      status.textContent = 'Registering ' + phoneNumber + '...';
+      try {
+        const data = await postJson('/api/dashboard/register-phone', {
+          phoneNumber: phoneNumber,
+          language: document.getElementById('stage-language').value,
+          pregnancyMonth: Number(document.getElementById('stage-month').value),
+          tbaCode: document.getElementById('stage-channel').value,
+          triggerCallNow: true,
+          adminKey: ADMIN_KEY
+        });
+        const phone = (data.mother && data.mother.phone_number) || phoneNumber;
+        selectedPhone = phone;
+        document.getElementById('stage-phone').value = phone;
+        status.textContent = 'Registered ' + phone + '.';
+        if (data.callLog && data.callLog.id) seenCallIds.add(data.callLog.id);
+        await refresh();
+        if (data.callLog) showIncomingCall(data.callLog);
+      } catch (error) {
+        status.textContent = error.message;
+      }
+    });
 
     async function postVoice(fields) {
       const body = new URLSearchParams(fields);

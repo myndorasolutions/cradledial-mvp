@@ -45,8 +45,9 @@ export const ussdRoutes = new Hono<{ Bindings: Bindings }>()
 
 ussdRoutes.get('/', (c) => {
   return c.json({
+    status: 'active',
     service: `CradleDial USSD Webhook (${USSD_SERVICE_CODE})`,
-    status: 'ok',
+    message: 'CradleDial USSD Webhook is active (POST required)',
   })
 })
 

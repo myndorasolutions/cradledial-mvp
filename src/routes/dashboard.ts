@@ -1,6 +1,6 @@
 import { Hono, type Context } from 'hono'
 import { makeOutboundCall, type OutboundCallResponse } from '../lib/africastalking'
-import { workerAudioUrl } from '../lib/audio'
+import { audioKey, workerAudioUrl } from '../lib/audio'
 import { normalizeNigerianPhone } from '../lib/phone'
 import { createSupabaseClient } from '../lib/supabase'
 import type { Bindings, Mother } from '../types/env'
@@ -31,6 +31,19 @@ dashboardRoutes.post('/broadcast', async (c) => {
   } catch (error) {
     console.error('Emergency broadcast failed', error)
     const message = error instanceof Error ? error.message : 'Emergency broadcast failed'
+    return c.json({ error: message }, 500)
+  }
+})
+
+dashboardRoutes.post('/register-phone', async (c) => {
+  try {
+    const body = (await c.req.json<Record<string, unknown>>().catch(() => ({}))) as Record<string, unknown>
+    if (!isAllowed(c, body.adminKey)) return c.json({ error: 'Unauthorized' }, 401)
+    return c.json(await registerStagePhone(c.env, body, new URL(c.req.url).origin))
+  } catch (error) {
+    console.error('Stage phone registration failed', error)
+    if (error instanceof StageInputError) return c.json({ error: error.message }, 400)
+    const message = error instanceof Error ? error.message : 'Stage phone registration failed'
     return c.json({ error: message }, 500)
   }
 })
@@ -215,6 +228,125 @@ async function sendBroadcast(env: Bindings, body: Record<string, unknown>, origi
   }
 
   return { dispatched: calls.length, broadcast, calls }
+}
+
+const STAGE_LANGUAGES = new Set(['english', 'pidgin', 'hausa', 'yoruba', 'igbo'])
+
+class StageInputError extends Error {}
+
+async function registerStagePhone(env: Bindings, body: Record<string, unknown>, origin: string) {
+  const rawPhone = typeof body.phoneNumber === 'string' ? body.phoneNumber.trim() : ''
+  if (!rawPhone) throw new StageInputError('phoneNumber is required')
+
+  let phone: string
+  try {
+    phone = normalizeNigerianPhone(rawPhone)
+  } catch {
+    throw new StageInputError('Invalid phone number. Enter a Nigerian number like 08031234567.')
+  }
+
+  const language = typeof body.language === 'string' ? body.language.trim().toLowerCase() : ''
+  if (!STAGE_LANGUAGES.has(language)) {
+    throw new StageInputError('Invalid language. Choose english, pidgin, hausa, yoruba, or igbo.')
+  }
+
+  const pregnancyMonth = Number(body.pregnancyMonth)
+  if (!Number.isInteger(pregnancyMonth) || pregnancyMonth < 1 || pregnancyMonth > 9) {
+    throw new StageInputError('Invalid month. Enter a number between 1 and 9.')
+  }
+  const gestationWeek = pregnancyMonth * 4
+  const tbaCode = typeof body.tbaCode === 'string' ? body.tbaCode.trim() : ''
+  const triggerCallNow = body.triggerCallNow === true
+  const supabase = createSupabaseClient(env)
+
+  let tbaId: string | null = null
+  let tbaOnboarded = 0
+  if (tbaCode) {
+    const { data: tba, error } = await supabase.from('tbas').select('*').eq('agent_code', tbaCode).maybeSingle()
+    if (error) throw new Error(error.message)
+    if (!tba) throw new StageInputError('Invalid TBA Agent Code.')
+    tbaId = tba.id
+    tbaOnboarded = Number(tba.total_onboarded)
+  }
+
+  const { data: existing, error: selectError } = await supabase
+    .from('mothers')
+    .select('*')
+    .eq('phone_number', phone)
+    .maybeSingle()
+  if (selectError) throw new Error(selectError.message)
+
+  const fields = {
+    language,
+    pregnancy_month: pregnancyMonth,
+    gestation_week: gestationWeek,
+    ward: 'Ward 4',
+    is_active: true,
+    tba_id: tbaId,
+  }
+
+  let mother: Mother
+  if (existing) {
+    const { data, error } = await supabase.from('mothers').update(fields).eq('id', existing.id).select('*').single()
+    if (error || !data) throw new Error(error?.message ?? 'Could not update the mother')
+    mother = data
+  } else {
+    const { data, error } = await supabase
+      .from('mothers')
+      .insert({ phone_number: phone, ...fields })
+      .select('*')
+      .single()
+    if (error || !data) throw new Error(error?.message ?? 'Could not register the mother')
+    mother = data
+  }
+
+  if (tbaId && existing?.tba_id !== tbaId) {
+    const { error } = await supabase
+      .from('tbas')
+      .update({ total_onboarded: tbaOnboarded + 1 })
+      .eq('id', tbaId)
+    if (error) throw new Error(error.message)
+  }
+
+  if (!triggerCallNow) return { mother, callLog: null, africastalking: null }
+
+  const audioUrl = workerAudioUrl(origin, audioKey(language, gestationWeek))
+  const { data: callLog, error: logError } = await supabase
+    .from('call_logs')
+    .insert({
+      phone_number: phone,
+      mother_id: mother.id,
+      call_type: 'weekly_ivr',
+      language,
+      gestation_week: gestationWeek,
+      audio_url: audioUrl,
+      status: 'queued',
+      duration_seconds: 0,
+      counted_toward_commission: false,
+    })
+    .select('*')
+    .single()
+  if (logError || !callLog) throw new Error(logError?.message ?? 'Could not queue the call')
+
+  let africastalking: OutboundCallResponse | null = null
+  let savedLog = callLog
+  try {
+    africastalking = await makeOutboundCall(env, phone)
+    if (africastalking.simulatedInSandbox) {
+      const { data: ringing, error: ringError } = await supabase
+        .from('call_logs')
+        .update({ status: 'ringing' })
+        .eq('id', callLog.id)
+        .select('*')
+        .single()
+      if (ringError || !ringing) throw new Error(ringError?.message ?? 'Could not mark the call as ringing')
+      savedLog = ringing
+    }
+  } catch (error) {
+    console.error('Stage outbound call failed', error)
+  }
+
+  return { mother, callLog: savedLog, africastalking }
 }
 
 function isAllowed(c: AppContext, adminKey: unknown): boolean {
